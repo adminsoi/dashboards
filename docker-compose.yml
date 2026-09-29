@@ -1,21 +1,17 @@
-# Standalone stack for the department dashboards.
+# SOI Aviation department dashboards — standalone stack.
 #
-# This runs on its own host — it does NOT share a Docker network with the MCP
-# connector stack, because Docker networks are per-host and the two now live on
-# different EC2 instances. It reaches the MCP stack's private backend over the
-# VPC private network instead. See PORTAINER.md for the full deploy.
+# Self-contained: Entra SSO and the dashboard UI, nothing else. No connection
+# to any other SOI system is required to run this.
 #
-#   docker compose up --build -d                     # app only
-#   docker compose --profile tls up --build -d        # app + its own HTTPS
+#   docker compose up --build -d                  # app only
+#   docker compose --profile tls up --build -d     # app + its own HTTPS
 #
-# BACKEND_BASE_URL must point at the MCP host's PRIVATE IP, e.g.
-# http://10.0.1.23:8080 — never its public IP, and never over the internet.
-# That requires, on the MCP host, one security-group rule and the backend port
-# published on its private interface. PORTAINER.md spells both out.
+# Use the `tls` profile only if ports 80/443 are free on this host. If a web
+# server already serves them, leave the profile off and point it at
+# 127.0.0.1:3000.
 #
-# Use the `tls` profile only if ports 80/443 are free on this host. If
-# something already serves them, leave the profile off and point that server at
-# 127.0.0.1:3000 instead.
+# Four variables are required: the three Entra values and SESSION_SECRET.
+# Everything else has a working default.
 
 services:
   dashboard:
@@ -34,23 +30,17 @@ services:
     pids_limit: 128
     mem_limit: 512m
     restart: unless-stopped
-    # Bound to loopback by default so the app is never directly internet-facing
-    # — TLS terminates in front of it, either the caddy service below or a web
-    # server already on this host. Override DASHBOARD_BIND only deliberately.
+    # Loopback by default so the app is never directly internet-facing — TLS
+    # terminates in front of it. Override only deliberately.
     ports:
       - "${DASHBOARD_BIND:-127.0.0.1:3000}:3000"
     environment:
       PORT: "3000"
       NODE_ENV: production
+      # Must match the Entra redirect URI, which is this + /auth/callback.
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://dashboard.soiaviation.com}
 
-      # The MCP stack's private backend, over the VPC. Holds every downstream
-      # API credential; this container holds none of them.
-      BACKEND_BASE_URL: ${BACKEND_BASE_URL:?set BACKEND_BASE_URL to the MCP host private IP, e.g. http://10.0.1.23:8080}
-      BACKEND_SERVICE_TOKEN: ${BACKEND_SERVICE_TOKEN:?set BACKEND_SERVICE_TOKEN — the value from the MCP host .env}
-      BACKEND_TIMEOUT_MS: ${BACKEND_TIMEOUT_MS:-15000}
-
-      # Entra SSO. This app needs its OWN app registration — not the MCP ones.
+      # --- Entra SSO (required) ---
       AUTH_MODE: entra
       ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:?set ENTRA_TENANT_ID}
       ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:?set ENTRA_CLIENT_ID}
@@ -58,9 +48,9 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET — at least 32 chars}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
 
-      # Department access control. Leave enforcement off until every group id
-      # below is real; it fails closed, so a half-filled directory locks people
-      # out rather than letting them in.
+      # --- Department access control (optional) ---
+      # Off by default: any signed-in SOI user can open any dashboard, and the
+      # home page says so. Turn on once the Entra groups exist; it fails closed.
       DEPT_ACCESS_ENFORCE: ${DEPT_ACCESS_ENFORCE:-false}
       DEPT_GROUP_GOVERNMENT: ${DEPT_GROUP_GOVERNMENT:-}
       DEPT_GROUP_PROCUREMENT: ${DEPT_GROUP_PROCUREMENT:-}
@@ -71,18 +61,18 @@ services:
       DEPT_GROUP_OPERATIONS: ${DEPT_GROUP_OPERATIONS:-}
       DEPT_GROUP_ALL: ${DEPT_GROUP_ALL:-}
 
-      # NAICS code driving the Government feed (336413 = aircraft parts).
-      GOVERNMENT_NAICS: ${GOVERNMENT_NAICS:-336413}
-
-      # The IT dashboard probes the fleet. The connector containers live on the
-      # other host, so by default probe only what this host can actually see.
-      # To include the connectors, publish their health ports and list them as
-      # "Label=host:port,..." — see PORTAINER.md.
+      # --- Data source (optional, off by default) ---
+      # Unset means standalone: every data tile honestly reports that nothing
+      # is connected. Set it later to light those tiles up; nothing else has
+      # to change.
+      BACKEND_BASE_URL: ${BACKEND_BASE_URL:-}
+      BACKEND_SERVICE_TOKEN: ${BACKEND_SERVICE_TOKEN:-}
       SERVICE_PROBES: ${SERVICE_PROBES:-}
+      GOVERNMENT_NAICS: ${GOVERNMENT_NAICS:-336413}
     healthcheck:
-      # Portainer shows this in its UI, and it distinguishes a crash-looping
-      # container from a misconfigured one. node:22-slim has no curl, so use
-      # Node's own fetch.
+      # Portainer shows this in its UI — the quickest way to tell a
+      # crash-looping container from a misconfigured one. node:22-slim has no
+      # curl, so use Node's own fetch.
       test:
         - CMD
         - node
@@ -94,8 +84,9 @@ services:
       start_period: 15s
 
   # --- Optional HTTPS front door --------------------------------------------
-  # Only starts with `--profile tls`. Skip it if this host already serves
-  # 80/443; point that server at 127.0.0.1:3000 instead.
+  # Starts only with `--profile tls`. Entra will not accept a plain-http
+  # redirect URI for a real hostname, so this app needs HTTPS one way or
+  # another: either this, or a web server already on 80/443 here.
   caddy:
     image: caddy:2
     profiles:

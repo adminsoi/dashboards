@@ -237,28 +237,28 @@ export const DEPARTMENTS: Department[] = [
   {
     slug: "it",
     name: "Information Technology",
-    tagline: "Live health of the SOI service fleet.",
+    tagline: "Sign-in, service health, and integration status.",
     accent: "blue",
     internalOnly: true,
     tiles: [
       {
         key: "servicesUp",
         label: "Services healthy",
-        hint: "Connectors and the private backend answering health probes.",
+        hint: "Services answering their health probes.",
         format: "status",
         source: "services",
       },
       {
         key: "backendStatus",
-        label: "Private backend",
-        hint: "The credential-holding backend on the internal network.",
+        label: "Data backend",
+        hint: "The optional backend supplying dashboard figures.",
         format: "status",
         source: "services",
       },
       {
         key: "integrationsPending",
         label: "Integrations pending",
-        hint: "Data sources scaffolded but not yet wired.",
+        hint: "Data sources this app expects but cannot reach yet.",
         format: "count",
         source: "services",
       },

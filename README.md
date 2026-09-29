@@ -7,18 +7,17 @@ SSO.
 Entra setup and deployment: [`SETUP.md`](SETUP.md).
 Deploying through Portainer: [`PORTAINER.md`](PORTAINER.md).
 
-This repo is deliberately standalone. It shares only a Docker network with the
-MCP connector stack, so it can reach that stack's private backend — which is
-where every downstream API credential lives.
+Standalone: SSO and the dashboard UI, connected to nothing else. A data source
+is optional and off by default — until one is configured, every data tile
+honestly reports that nothing is connected.
 
 ## Design rules
 
 1. **Never show a number we can't source.** A tile is either live or it shows
    an em dash plus the reason. Unwired integrations never render as `0`, and any
-   page containing one carries a placeholder banner. This mirrors the MCP
-   server's existing "honest 501" posture.
-2. **Credentials stay in the private backend.** This app holds only
-   `BACKEND_SERVICE_TOKEN` and its own Entra secret — no downstream API keys.
+   page containing one carries a placeholder banner.
+2. **Minimal secrets.** The app holds its own Entra secret and a session key.
+   A data source, if one is ever configured, is reached read-only.
 3. **Read-only.** Only GETs to the backend. No write path to a system of record.
 4. **No client-side JavaScript**, so the CSP can deny scripts outright.
 5. **Two accent colours** — SOI red and SOI blue — and nothing else.
@@ -34,9 +33,9 @@ src/
   access.ts            department access from Entra group claims
   departments.ts       THE REGISTRY — departments, tiles, and each tile's source
   sources/
-    backend.ts         client for the private backend
+    backend.ts         client for the optional data source
     metrics.ts         per-department loaders
-    pentagon.ts        Pentagon 2000 adapter — the one file to edit when wired
+    pentagon.ts        ERP adapter — the one file to edit when wired
     services.ts        health probes powering the IT dashboard
   views/
     html.ts            escaping + page shell
@@ -56,8 +55,7 @@ npm run dev
 ```
 
 `AUTH_MODE=none` signs you in as a local dev user and is refused when
-`NODE_ENV=production`. To exercise the live Government tiles, point
-`BACKEND_BASE_URL` at a running instance of the MCP stack's backend.
+`NODE_ENV=production`.
 
 ```bash
 npm run build && npm start   # production build
@@ -69,11 +67,10 @@ npm run build && npm start   # production build
 docker compose up --build -d
 ```
 
-Requires the MCP stack to be running (for its network and `backend`
-container) and its Caddyfile to route `dashboard.soiaviation.com` to
-`dashboard:3000`.
+Add `--profile tls` to run the bundled Caddy for HTTPS, if ports 80/443 are
+free on the host.
 
-On the EC2 host this is deployed as a Portainer Git stack instead — see
+On EC2 this is deployed as a Portainer Git stack — see
 [`PORTAINER.md`](PORTAINER.md).
 
 ## Routes

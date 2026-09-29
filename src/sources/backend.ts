@@ -1,11 +1,13 @@
 /**
- * Client for the private SOI backend (../../backend/server.mjs).
+ * Client for an optional data backend.
  *
- * The backend is the only component holding downstream credentials and is not
- * reachable from the internet; this app talks to it over the internal Docker
- * network with BACKEND_SERVICE_TOKEN, exactly as the MCP proxies do. The
- * signed-in user's identity is forwarded as `x-soi-user` so backend logs stay
- * attributable to a person rather than to "the dashboard".
+ * BACKEND_BASE_URL is unset by default, and that is a supported configuration:
+ * the app runs standalone and every data tile reports "no source connected".
+ * Point it at a backend later and the same tiles light up.
+ *
+ * When one is configured, the signed-in user's identity is forwarded as
+ * `x-soi-user` so the backend's logs stay attributable to a person rather than
+ * to "the dashboard".
  *
  * The backend answers 501 for integrations that exist but are not wired
  * (Pentagon 2000, ILS). That is a first-class outcome here, not an error: it
@@ -27,6 +29,12 @@ export async function backendGet<T>(
   path: string,
   opts: { user: string; query?: Record<string, string | number | undefined> } = { user: "unknown" },
 ): Promise<BackendResult<T>> {
+  // No backend configured — the standalone default. Say so plainly rather
+  // than failing, so tiles render "not connected" instead of an error.
+  if (!config.backend.enabled) {
+    return { state: "not_configured", note: "No data source is connected yet." };
+  }
+
   const url = new URL(path, config.backend.baseUrl);
   for (const [k, v] of Object.entries(opts.query ?? {})) {
     if (v !== undefined && v !== "") url.searchParams.set(k, String(v));

@@ -1,10 +1,12 @@
 # Department dashboards — setup and deployment
 
-The app at `dashboard.soiaviation.com` is a browser app, not an MCP connector,
-so it needs its **own** Entra app registration. Do not reuse
-`SOI Aviation MCP API` or `SOI Aviation MCP - Claude Client`: those are an API
-and a public client, and this is a confidential web client with a different
-redirect URI and a client secret.
+The app at `dashboard.soiaviation.com` needs its **own** Entra app
+registration.
+
+> If the tenant already has `SOI Aviation MCP API` or
+> `SOI Aviation MCP - Claude Client` registrations, do not reuse them. Those are
+> an API and a public client; this is a confidential web client with a different
+> redirect URI and a client secret. Reusing one will not work.
 
 Tenant: `57ded119-c5e8-4224-b902-3d9240e1dfb7` (same directory as M365).
 
@@ -76,10 +78,10 @@ be mistaken for "locked down". Set it to `true` and redeploy to enforce.
 
 ## 3. DNS
 
-Add an A record in GoDaddy alongside the existing `mcp-*` records:
+Add an A record in GoDaddy pointing at this host's public IP:
 
 ```
-dashboard.soiaviation.com.  A  44.230.167.99
+dashboard.soiaviation.com.  A  <this host's public IP>
 ```
 
 Caddy obtains the certificate automatically on first request, but cannot do so
@@ -87,55 +89,27 @@ until DNS resolves — add the record before deploying.
 
 ---
 
-## 4. How this fits the existing stack
+## 4. Deploy
 
-The dashboards run on `i-019d9663e35988b74`. The MCP connector stack — and the
-private backend holding every downstream API credential — runs on a different
-instance, `i-0129a9ac033b36673` (`44.230.167.99`).
+The app is standalone: Entra SSO and the dashboard UI, connected to nothing
+else.
 
-```
-browser ──HTTPS──▶ dashboards host        MCP host
-                     dashboard:3000  ───▶  backend:8080  (PRIVATE)
-                                    VPC      holds every API credential
-                              security-group locked to one instance
-```
-
-Docker networks are per-host, so the two cannot share one. The dashboard
-reaches the backend across the **VPC private network**. The backend still never
-touches the public internet: it is bound to the MCP host's private IP and its
-security group admits exactly one source — the dashboards host's security
-group.
-
-This app never receives a downstream API credential. It holds only
-`BACKEND_SERVICE_TOKEN` and its own Entra secret.
-
-One consequence worth knowing: traffic on that VPC hop is plain HTTP, protected
-by the security group and the service token rather than TLS. That is acceptable
-inside a single VPC, but it is a real difference from the fully-isolated
-original and worth revisiting if the two hosts ever stop being neighbours.
-
-[`PORTAINER.md`](PORTAINER.md) has the exact steps: the `BACKEND_BIND` change
-and the security-group rule on the MCP host, DNS, and how TLS terminates.
-
-## 5. Deploy
-
-### Option A — docker compose on the host
+On the host, by hand:
 
 ```bash
-git clone git@github.com:adminsoi/dashboards.git
+git clone https://github.com/adminsoi/dashboards.git
 cd dashboards
-cp .env.example .env     # then fill it in
+cp .env.example .env     # fill in the four Entra values
 openssl rand -base64 48  # value for SESSION_SECRET
-docker compose up --build -d
+docker compose up --build -d                  # app only
+docker compose --profile tls up --build -d    # app + its own HTTPS
 ```
 
-### Option B — Portainer, Git-backed stack  ← how this is deployed on EC2
+Use the `tls` profile only if ports 80/443 are free here; otherwise point the
+existing web server at `127.0.0.1:3000`.
 
-Full steps, environment variables and troubleshooting are in
-[`PORTAINER.md`](PORTAINER.md). In short: Portainer clones this repo on the
-host, builds the image, and joins the MCP stack's network. Two prerequisites in
-section 4 above (the shared network and the Caddy route) are one-offs over SSH
-that Portainer cannot do for you.
+Through Portainer, which is how this is deployed on EC2, see
+[`PORTAINER.md`](PORTAINER.md).
 
 ### Verify
 
@@ -143,48 +117,25 @@ that Portainer cannot do for you.
 curl -s https://dashboard.soiaviation.com/healthz
 ```
 
-It reports `authMode`, whether department access is enforced, and which
-dashboards still have no group configured. It needs no authentication and
-returns no secrets, so it is safe for an uptime check.
+It reports the auth mode, whether department access is enforced, and which
+dashboards have no Entra group configured. No authentication needed, no
+secrets returned.
 
----
+## 5. What the dashboards show today
 
-## 6. What the dashboards show today
+All seven dashboards render, behind SSO. Every data tile shows "—" with "No
+data source is connected yet", because no data source is wired to this app.
 
-The app never displays a figure it cannot source. Tiles whose integration is
-not wired render an em dash and the reason, under a visible placeholder banner.
-They are never rendered as `0`.
+That is deliberate, not a gap: the app never displays a figure it cannot
+source, and a `0` would be a claim about SOI's business that nothing supports.
+Each tile states its own provenance, so what is real and what is pending is
+visible at a glance.
 
-| Dashboard | Source | Status |
-|---|---|---|
-| Government | SAM.gov, via the private backend | **Live** — open solicitations, closing within 7 days, posted this week, set-aside count, latest notices |
-| Information Technology | Health probes of the container fleet | **Live** — per-service up/down, pending integrations, SSO tenant |
-| Procurement | Pentagon 2000 | Placeholder — backend returns 501 |
-| Purchasing | Pentagon 2000 | Placeholder — backend returns 501 |
-| Finance | Pentagon 2000 | Placeholder — backend returns 501 |
-| Operations | Pentagon 2000 | Placeholder — backend returns 501 |
-| Human Resources | HR system | Placeholder — no integration exists |
-
-SAM.gov is public data and sits on the Government dashboard only. Every other
-dashboard is marked internal-only in the UI.
-
-### Wiring Pentagon 2000
-In the **MCP repo**, `backend/server.mjs` currently answers
-`notIntegrated("Pentagon 2000")` for `/v1/inventory` and `/v1/rfqs/*`. To go
-live:
-
-1. Replace those handlers with real Pentagon 2000 calls, reading the base URL
-   and credentials from env, and add those vars to the **`backend`** service in
-   `docker-compose.multi.yml`. Credentials belong in the private backend only,
-   never in this container.
-2. Prefer adding small summary endpoints (e.g. `/v1/summary/purchasing`) that
-   return counts, so the dashboards don't pull whole record sets just to
-   length them.
-3. Point `metricFrom` in `src/sources/pentagon.ts` at those fields.
-
-Nothing else in this repo needs to change.
-
----
+To connect a data source later, set `BACKEND_BASE_URL` — and
+`BACKEND_SERVICE_TOKEN` if it requires one — and redeploy. The app expects a
+small read-only HTTP API; `src/sources/` holds the client and the per-dashboard
+loaders, and `src/departments.ts` maps every tile to its source. Nothing else
+needs to change.
 
 ## Security notes
 

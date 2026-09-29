@@ -1,13 +1,14 @@
 /**
  * Environment configuration for the department dashboard.
  *
- * Two trust boundaries, mirroring the MCP proxy (../src/config.ts):
+ * Two trust boundaries:
  *   - Browser -> this app. Every page except /healthz and the login routes
  *     requires a signed session cookie, issued only after a successful
  *     Microsoft Entra ID authorization-code (PKCE) sign-in.
- *   - This app -> SOI backend. The same private backend the MCP proxies use,
- *     reached over the internal Docker network with BACKEND_SERVICE_TOKEN.
- *     The backend remains the only place downstream credentials live.
+ *   - This app -> a data backend, which is OPTIONAL. With BACKEND_BASE_URL
+ *     unset — the default — the app runs entirely standalone: sign-in works
+ *     and every data tile honestly reports that no source is connected. Set it
+ *     later to light those tiles up; nothing else has to change.
  *
  * This app is READ-ONLY. It issues GETs to the backend and renders them; it
  * never writes to a system of record.
@@ -35,11 +36,17 @@ export const config = {
   /** Where Entra sends the user back after sign-in. Register this exact value. */
   redirectUri: `${publicBaseUrl}/auth/callback`,
 
-  /** The private backend shared with the MCP proxies. */
+  /**
+   * Optional data backend. Empty baseUrl means "no data source connected",
+   * which is a supported, fully working configuration — not an error.
+   */
   backend: {
-    baseUrl: process.env.BACKEND_BASE_URL ?? "http://backend:8080",
+    baseUrl: (process.env.BACKEND_BASE_URL ?? "").trim(),
     serviceToken: process.env.BACKEND_SERVICE_TOKEN ?? "",
     timeoutMs: Number(process.env.BACKEND_TIMEOUT_MS ?? 15_000),
+    get enabled(): boolean {
+      return this.baseUrl.length > 0;
+    },
   },
 
   auth: {

@@ -13,6 +13,8 @@
  * cannot see them would be a false alarm, and an IT dashboard that cries wolf
  * is worse than one that admits it cannot see something.
  */
+import { config } from "./../config.js";
+import { DEPARTMENTS, SOURCE_LABELS, type SourceId } from "./../departments.js";
 import { backendGet } from "./backend.js";
 
 export interface ServiceProbe {
@@ -26,6 +28,8 @@ export interface FleetStatus {
   healthy: number;
   total: number;
   backendHealthy: boolean;
+  /** False when no backend is configured — absence, not failure. */
+  backendConfigured: boolean;
   pendingIntegrations: string[];
 }
 
@@ -70,32 +74,39 @@ export async function probeServices(user: string): Promise<FleetStatus> {
     backendGet<{ status?: string; samGov?: string; partsBase?: string }>("/healthz", { user }),
   ]);
 
-  const backendHealthy = backend.state === "ok" && backend.data?.status === "ok";
+  const backendConfigured = config.backend.enabled;
+  const backendHealthy = backendConfigured && backend.state === "ok" && backend.data?.status === "ok";
 
-  // Read pending integrations from the backend's own health report rather than
-  // hard-coding a list here, so this stays true as integrations land.
-  const pendingIntegrations: string[] = [];
-  if (backend.state === "ok" && backend.data) {
-    if (backend.data.samGov !== "configured") pendingIntegrations.push("SAM.gov");
-    if (backend.data.partsBase !== "configured") pendingIntegrations.push("PartsBase");
+  // Derive this from the department registry rather than hard-coding a list,
+  // so it stays true as tiles and sources change. Without a backend every data
+  // source is pending, which is the honest answer for a standalone deployment.
+  const dataSources = new Set<SourceId>();
+  for (const dept of DEPARTMENTS) {
+    for (const tile of dept.tiles) {
+      if (tile.source !== "services") dataSources.add(tile.source);
+    }
   }
-  // These two are scaffolded-but-unwired in the backend today.
-  pendingIntegrations.push("Pentagon 2000", "ILS");
+  const pendingIntegrations = backendConfigured
+    ? [...dataSources].filter((s) => s !== "samgov").map((s) => SOURCE_LABELS[s])
+    : [...dataSources].map((s) => SOURCE_LABELS[s]);
 
-  const all: ServiceProbe[] = [
-    ...services,
-    {
-      name: "Private backend",
+  // Only list the backend when there is one. An unconfigured backend is not a
+  // down service, and listing it as such would be a standing false alarm.
+  const all: ServiceProbe[] = [...services];
+  if (backendConfigured) {
+    all.push({
+      name: "Data backend",
       healthy: backendHealthy,
       detail: backendHealthy ? "healthz ok" : (backend.note ?? "no response"),
-    },
-  ];
+    });
+  }
 
   return {
     services: all,
     healthy: all.filter((s) => s.healthy).length,
     total: all.length,
     backendHealthy,
+    backendConfigured,
     pendingIntegrations,
   };
 }

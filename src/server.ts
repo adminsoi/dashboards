@@ -5,8 +5,8 @@
  *   - every page except /healthz, /assets/* and the auth routes requires a
  *     Microsoft Entra ID sign-in (same SSO/MFA as M365);
  *   - department visibility comes from Entra group membership (src/access.ts);
- *   - data is read from the private SOI backend that the MCP connectors
- *     already use, so downstream credentials stay in one place.
+ *   - data comes from an optional read-only backend. None is configured by
+ *     default, and the app is fully usable that way.
  *
  * It ships no client-side JavaScript, which is why the CSP below can deny
  * scripts entirely.
@@ -256,7 +256,7 @@ app.listen(config.port, () => {
   console.log(
     `SOI dashboards listening on :${config.port} — auth ${config.auth.mode}; ` +
       `department access ${posture.enforcing ? "ENFORCED" : "PERMISSIVE (not enforced)"}; ` +
-      `backend ${config.backend.baseUrl}.`,
+      `data backend ${config.backend.enabled ? config.backend.baseUrl : "not configured (standalone)"}.`,
   );
   if (posture.unconfiguredDepartments.length) {
     console.log(

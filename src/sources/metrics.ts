@@ -179,13 +179,15 @@ function formatDate(raw: string | null): string {
 async function loadIt(user: string): Promise<DepartmentData> {
   const probe = await probeServices(user);
   const metrics: MetricMap = {
-    servicesUp: {
-      state: "live",
-      value: `${probe.healthy}/${probe.total} up`,
-    },
-    backendStatus: probe.backendHealthy
-      ? { state: "live", value: "Reachable" }
-      : { state: "error", note: "The private backend did not answer its health probe." },
+    servicesUp:
+      probe.total > 0
+        ? { state: "live", value: `${probe.healthy}/${probe.total} up` }
+        : { state: "not_configured", note: "No services are configured to probe." },
+    backendStatus: !probe.backendConfigured
+      ? { state: "not_configured", note: "No data backend is connected." }
+      : probe.backendHealthy
+        ? { state: "live", value: "Reachable" }
+        : { state: "error", note: "The data backend did not answer its health probe." },
     integrationsPending: { state: "live", value: probe.pendingIntegrations.length },
     ssoTenant: {
       state: "live",
