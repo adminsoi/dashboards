@@ -89,41 +89,33 @@ until DNS resolves — add the record before deploying.
 
 ## 4. How this fits the existing stack
 
-This repo is standalone, with one deliberate coupling: it joins the MCP
-connector stack's Docker network. That is what lets the dashboard reach the
-private backend, and lets Caddy reach the dashboard.
+The dashboards run on `i-019d9663e35988b74`. The MCP connector stack — and the
+private backend holding every downstream API credential — runs on a different
+instance, `i-0129a9ac033b36673` (`44.230.167.99`).
 
 ```
-browser ──HTTPS──▶ Caddy (MCP stack) ──▶ dashboard:3000 (this repo)
-                                              │
-                                              ▼
-                                    backend:8080 (MCP stack, PRIVATE)
-                                       holds every API credential
+browser ──HTTPS──▶ dashboards host        MCP host
+                     dashboard:3000  ───▶  backend:8080  (PRIVATE)
+                                    VPC      holds every API credential
+                              security-group locked to one instance
 ```
 
-Two prerequisites on the host, both one-offs:
-
-1. **The MCP stack is running**, so its network and `backend` container exist.
-   Confirm the network name and set `SOI_NETWORK` if it differs from the
-   default `soi-aviation-mcp_default`:
-   ```bash
-   docker network ls | grep soi
-   ```
-2. **Caddy routes the hostname.** The MCP repo's `Caddyfile` already contains:
-   ```
-   dashboard.soiaviation.com {
-       reverse_proxy dashboard:3000
-   }
-   ```
-   Reload Caddy after adding it:
-   ```bash
-   docker compose -f docker-compose.multi.yml restart caddy
-   ```
+Docker networks are per-host, so the two cannot share one. The dashboard
+reaches the backend across the **VPC private network**. The backend still never
+touches the public internet: it is bound to the MCP host's private IP and its
+security group admits exactly one source — the dashboards host's security
+group.
 
 This app never receives a downstream API credential. It holds only
 `BACKEND_SERVICE_TOKEN` and its own Entra secret.
 
----
+One consequence worth knowing: traffic on that VPC hop is plain HTTP, protected
+by the security group and the service token rather than TLS. That is acceptable
+inside a single VPC, but it is a real difference from the fully-isolated
+original and worth revisiting if the two hosts ever stop being neighbours.
+
+[`PORTAINER.md`](PORTAINER.md) has the exact steps: the `BACKEND_BIND` change
+and the security-group rule on the MCP host, DNS, and how TLS terminates.
 
 ## 5. Deploy
 

@@ -1,0 +1,12 @@
+# Used only by the optional `tls` profile in docker-compose.yml.
+#
+# Caddy obtains and renews a Let's Encrypt certificate automatically. That needs
+# ports 80 and 443 reachable from the internet and dashboard.soiaviation.com
+# resolving to THIS host's public IP.
+#
+# Skip this file entirely if a web server already owns 80/443 here — point that
+# server at 127.0.0.1:3000 instead.
+
+dashboard.soiaviation.com {
+	reverse_proxy dashboard:3000
+}

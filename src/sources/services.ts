@@ -1,10 +1,17 @@
 /**
  * Health probes for the SOI service fleet, powering the IT dashboard.
  *
- * Probes run over the internal Docker network by container name, so they test
- * the services themselves rather than the public DNS + TLS path, and they work
- * even if a DNS record or certificate is broken. /healthz on every service is
- * unauthenticated by design (see ../../src/server.ts), so no token is needed.
+ * /healthz on every SOI service is unauthenticated by design, so no token is
+ * needed to probe one.
+ *
+ * What is probeable depends on where this app runs. The private backend is
+ * always probed. The connector containers are only reachable when they share a
+ * Docker network with this app — on a separate host they are not, so they are
+ * probed ONLY when SERVICE_PROBES names them explicitly.
+ *
+ * That default matters: reporting six connectors as "down" because this host
+ * cannot see them would be a false alarm, and an IT dashboard that cries wolf
+ * is worse than one that admits it cannot see something.
  */
 import { backendGet } from "./backend.js";
 
@@ -23,21 +30,17 @@ export interface FleetStatus {
 }
 
 /**
- * Container name -> friendly label. Matches docker-compose.multi.yml. Override
- * with SERVICE_PROBES="label=host:port,…" if the fleet changes.
+ * Extra services to probe, as "Label=host:port,Label=host:port".
+ *
+ * Empty by default. When this app shares a Docker network with the connector
+ * stack, set it to the container names:
+ *   SAM.gov connector=proxy-samgov:3000,PartsBase connector=proxy-partsbase:3000,…
+ * When it runs on a separate host, use the reachable addresses instead, or
+ * leave it unset and the IT dashboard will show the backend alone.
  */
-const DEFAULT_PROBES: Array<[string, string]> = [
-  ["SAM.gov connector", "proxy-samgov:3000"],
-  ["PartsBase connector", "proxy-partsbase:3000"],
-  ["Pentagon 2000 connector", "proxy-pentagon:3000"],
-  ["ILS connector", "proxy-ils:3000"],
-  ["Locatory connector", "proxy-locatory:3000"],
-  ["Manuals connector", "proxy-manuals:3000"],
-];
-
 function probeList(): Array<[string, string]> {
   const raw = process.env.SERVICE_PROBES;
-  if (!raw) return DEFAULT_PROBES;
+  if (!raw) return [];
   return raw
     .split(",")
     .map((entry) => entry.split("="))
