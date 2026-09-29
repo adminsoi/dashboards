@@ -1,19 +1,19 @@
-# SOI Aviation department dashboards — standalone stack.
+# SOI Aviation department dashboards — the Portainer stack.
 #
-# Self-contained: Entra SSO and the dashboard UI, nothing else. No connection
-# to any other SOI system is required to run this.
+# This does NOT run its own web server or get its own certificate. It joins
+# the MCP stack's Docker network and the Caddy already running there proxies
+# to it, exactly as the connectors are served. One front door, one set of
+# certificates, one place to look when something breaks.
 #
-#   docker compose up --build -d                  # app only
-#   docker compose --profile tls up --build -d     # app + its own HTTPS
+#   docker compose up --build -d
 #
-# Use the `tls` profile only if ports 80/443 are free on this host. If a web
-# server already serves them, leave the profile off and point it at
-# 127.0.0.1:3000.
+# Two prerequisites on the host, both one-offs Portainer cannot do for you:
+#   1. The MCP stack is up, so its network exists. SOI_NETWORK must name that
+#      network — check Portainer's Networks page, or `docker network ls | grep soi`.
+#   2. The MCP stack's Caddyfile has a block routing dashboard.soiaviation.com
+#      to dashboard:3000, and Caddy has been reloaded.
 #
-# Four variables are required: the three Entra values and SESSION_SECRET.
-# Everything else has a working default. The `tls` profile additionally needs
-# GODADDY_API_TOKEN, since it gets its certificate over DNS-01 rather than by
-# being reachable from the internet.
+# See PORTAINER.md.
 
 services:
   dashboard:
@@ -32,10 +32,10 @@ services:
     pids_limit: 128
     mem_limit: 512m
     restart: unless-stopped
-    # Loopback by default so the app is never directly internet-facing — TLS
-    # terminates in front of it. Override only deliberately.
-    ports:
-      - "${DASHBOARD_BIND:-127.0.0.1:3000}:3000"
+    # No published port on purpose — Caddy terminates TLS and proxies in over
+    # the shared network. Nothing here is reachable from outside it.
+    expose:
+      - "3000"
     environment:
       PORT: "3000"
       NODE_ENV: production
@@ -63,10 +63,12 @@ services:
       DEPT_GROUP_OPERATIONS: ${DEPT_GROUP_OPERATIONS:-}
       DEPT_GROUP_ALL: ${DEPT_GROUP_ALL:-}
 
-      # --- Data source (optional, off by default) ---
-      # Unset means standalone: every data tile honestly reports that nothing
-      # is connected. Set it later to light those tiles up; nothing else has
-      # to change.
+      # --- Data source (optional) ---
+      # Empty means standalone: every data tile honestly reports that nothing
+      # is connected, which is a supported configuration. Because this shares
+      # the MCP stack's network, the backend is reachable at
+      # http://backend:8080 — set BACKEND_BASE_URL to that (and the token) to
+      # light the tiles up. Nothing else has to change.
       BACKEND_BASE_URL: ${BACKEND_BASE_URL:-}
       BACKEND_SERVICE_TOKEN: ${BACKEND_SERVICE_TOKEN:-}
       SERVICE_PROBES: ${SERVICE_PROBES:-}
@@ -84,38 +86,16 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    networks:
+      soi:
+        # Caddy proxies to the name "dashboard", so pin the alias rather than
+        # relying on the compose project name.
+        aliases:
+          - dashboard
 
-  # --- Optional HTTPS front door --------------------------------------------
-  # Starts only with `--profile tls`. Entra will not accept a plain-http
-  # redirect URI for a real hostname, so this app needs HTTPS one way or
-  # another: either this, or a web server already on 80/443 here.
-  caddy:
-    # Built, not pulled: the stock image can only prove domain ownership over
-    # HTTP, and this host has no public IP. ./caddy/Dockerfile compiles in the
-    # DNS-01 provider plugins. See the Caddyfile.
-    build:
-      context: ./caddy
-    profiles:
-      - tls
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      # The hostname Caddy serves and gets a certificate for. Keep this and
-      # PUBLIC_BASE_URL in agreement — Entra matches the redirect URI exactly.
-      DASHBOARD_HOST: ${DASHBOARD_HOST:-dashboard.soiaviation.com}
-      # "key:secret" from a GoDaddy Production API key. Plain `:-` and not
-      # `:?`: Compose interpolates the whole file whatever the active profile,
-      # so a required-marker here would break deploys that don't use TLS.
-      GODADDY_API_TOKEN: ${GODADDY_API_TOKEN:-}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - dashboard
-
-volumes:
-  caddy_data:
-  caddy_config:
+networks:
+  soi:
+    external: true
+    # Default network of the MCP stack (compose names it <project>_default).
+    # Override with SOI_NETWORK if that stack is named something else.
+    name: ${SOI_NETWORK:-soi-aviation-mcp_default}
