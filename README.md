@@ -4,7 +4,8 @@ A minimal, read-only web app with one dashboard per department (Government,
 Procurement, Purchasing, Finance, HR, IT, Operations), behind Microsoft Entra
 SSO.
 
-Deployment and Entra setup: [`SETUP.md`](SETUP.md).
+Entra setup and deployment: [`SETUP.md`](SETUP.md).
+Deploying through Portainer: [`PORTAINER.md`](PORTAINER.md).
 
 This repo is deliberately standalone. It shares only a Docker network with the
 MCP connector stack, so it can reach that stack's private backend — which is
@@ -70,7 +71,10 @@ docker compose up --build -d
 
 Requires the MCP stack to be running (for its network and `backend`
 container) and its Caddyfile to route `dashboard.soiaviation.com` to
-`dashboard:3000`. See [`SETUP.md`](SETUP.md), including the Portainer route.
+`dashboard:3000`.
+
+On the EC2 host this is deployed as a Portainer Git stack instead — see
+[`PORTAINER.md`](PORTAINER.md).
 
 ## Routes
 

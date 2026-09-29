@@ -9,10 +9,13 @@
 #
 #   docker compose up --build -d
 #
-# Two prerequisites on the host, both one-offs:
+# For the Portainer route, see PORTAINER.md. Portainer builds this image on the
+# host from the repo, so no registry is needed.
+#
+# Two prerequisites on the host, both one-offs Portainer cannot do for you:
 #   1. The MCP stack is up, so its network and `backend` container exist.
 #   2. The MCP stack's Caddyfile routes dashboard.soiaviation.com to
-#      dashboard:3000 (that block is already committed there).
+#      dashboard:3000, and Caddy has been reloaded.
 
 services:
   dashboard:
@@ -34,6 +37,19 @@ services:
     # No published port on purpose — Caddy terminates TLS and proxies in.
     expose:
       - "3000"
+    # Portainer shows this in its UI, and it's the quickest way to tell a
+    # crash-looping container from a misconfigured one. No curl in node:22-slim,
+    # so use Node's own fetch.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     environment:
       PORT: "3000"
       NODE_ENV: production

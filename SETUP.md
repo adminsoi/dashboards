@@ -137,24 +137,13 @@ openssl rand -base64 48  # value for SESSION_SECRET
 docker compose up --build -d
 ```
 
-### Option B — Portainer, Git-backed stack
+### Option B — Portainer, Git-backed stack  ← how this is deployed on EC2
 
-Portainer → **Stacks** → **Add stack** → **Repository**.
-
-| Field | Value |
-|---|---|
-| Repository URL | `https://github.com/adminsoi/dashboards` |
-| Reference | `refs/heads/main` |
-| Compose path | `docker-compose.yml` |
-| Authentication | on — the repo is private, so use a PAT or deploy key |
-
-Add the variables from `.env.example` under **Environment variables** rather
-than committing a `.env`. Enable **GitOps updates** (poll or webhook) if you
-want pushes to `main` to redeploy.
-
-Portainer names the network `<stack-name>_default`, but this stack uses an
-**external** network, so that does not apply — just make sure `SOI_NETWORK`
-matches the MCP stack's actual network name.
+Full steps, environment variables and troubleshooting are in
+[`PORTAINER.md`](PORTAINER.md). In short: Portainer clones this repo on the
+host, builds the image, and joins the MCP stack's network. Two prerequisites in
+section 4 above (the shared network and the Caddy route) are one-offs over SSH
+that Portainer cannot do for you.
 
 ### Verify
 
