@@ -1,0 +1,81 @@
+# Standalone stack for the department dashboards — deployable on its own, and
+# the file Portainer should point at for a Git-backed stack.
+#
+# It is intentionally separate from the MCP connector stack, but shares one
+# thing with it: the Docker network. The dashboard has to reach the private
+# backend (backend:8080) and Caddy has to reach the dashboard, and both of
+# those live in the MCP stack. So this joins that stack's network as an
+# external network rather than creating its own.
+#
+#   docker compose up --build -d
+#
+# Two prerequisites on the host, both one-offs:
+#   1. The MCP stack is up, so its network and `backend` container exist.
+#   2. The MCP stack's Caddyfile routes dashboard.soiaviation.com to
+#      dashboard:3000 (that block is already committed there).
+
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # Least-privilege: nothing here writes to disk at runtime.
+    user: "node"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    restart: unless-stopped
+    # No published port on purpose — Caddy terminates TLS and proxies in.
+    expose:
+      - "3000"
+    environment:
+      PORT: "3000"
+      NODE_ENV: production
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://dashboard.soiaviation.com}
+
+      # The private backend in the MCP stack. Holds every downstream
+      # credential; this container holds none of them.
+      BACKEND_BASE_URL: ${BACKEND_BASE_URL:-http://backend:8080}
+      BACKEND_SERVICE_TOKEN: ${BACKEND_SERVICE_TOKEN:?set BACKEND_SERVICE_TOKEN}
+
+      # Entra SSO. This app needs its OWN app registration — not the MCP ones.
+      AUTH_MODE: entra
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:?set ENTRA_TENANT_ID}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:?set ENTRA_CLIENT_ID}
+      ENTRA_CLIENT_SECRET: ${ENTRA_CLIENT_SECRET:?set ENTRA_CLIENT_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
+
+      # Department access control. Leave enforcement off until every group id
+      # below is real; it fails closed, so a half-filled directory locks
+      # people out rather than letting them in.
+      DEPT_ACCESS_ENFORCE: ${DEPT_ACCESS_ENFORCE:-false}
+      DEPT_GROUP_GOVERNMENT: ${DEPT_GROUP_GOVERNMENT:-}
+      DEPT_GROUP_PROCUREMENT: ${DEPT_GROUP_PROCUREMENT:-}
+      DEPT_GROUP_PURCHASING: ${DEPT_GROUP_PURCHASING:-}
+      DEPT_GROUP_FINANCE: ${DEPT_GROUP_FINANCE:-}
+      DEPT_GROUP_HR: ${DEPT_GROUP_HR:-}
+      DEPT_GROUP_IT: ${DEPT_GROUP_IT:-}
+      DEPT_GROUP_OPERATIONS: ${DEPT_GROUP_OPERATIONS:-}
+      DEPT_GROUP_ALL: ${DEPT_GROUP_ALL:-}
+
+      # NAICS code driving the Government opportunity feed (336413 = aircraft parts).
+      GOVERNMENT_NAICS: ${GOVERNMENT_NAICS:-336413}
+    networks:
+      soi:
+        # Caddy proxies to the name "dashboard", so pin the alias rather than
+        # relying on the compose project name.
+        aliases:
+          - dashboard
+
+networks:
+  soi:
+    external: true
+    # Default network of the MCP stack (compose names it <project>_default).
+    name: ${SOI_NETWORK:-soi-aviation-mcp_default}

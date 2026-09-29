@@ -1,0 +1,22 @@
+{
+  "name": "soi-dashboard",
+  "version": "0.1.0",
+  "description": "Minimal per-department dashboard for SOI Aviation. Microsoft Entra SSO, read-only, server-rendered, deployed behind the same Caddy front door as the MCP connectors.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "jose": "^5.10.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
