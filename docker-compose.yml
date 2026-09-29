@@ -11,7 +11,9 @@
 # 127.0.0.1:3000.
 #
 # Four variables are required: the three Entra values and SESSION_SECRET.
-# Everything else has a working default.
+# Everything else has a working default. The `tls` profile additionally needs
+# GODADDY_API_TOKEN, since it gets its certificate over DNS-01 rather than by
+# being reachable from the internet.
 
 services:
   dashboard:
@@ -88,13 +90,25 @@ services:
   # redirect URI for a real hostname, so this app needs HTTPS one way or
   # another: either this, or a web server already on 80/443 here.
   caddy:
-    image: caddy:2
+    # Built, not pulled: the stock image can only prove domain ownership over
+    # HTTP, and this host has no public IP. ./caddy/Dockerfile compiles in the
+    # DNS-01 provider plugins. See the Caddyfile.
+    build:
+      context: ./caddy
     profiles:
       - tls
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      # The hostname Caddy serves and gets a certificate for. Keep this and
+      # PUBLIC_BASE_URL in agreement — Entra matches the redirect URI exactly.
+      DASHBOARD_HOST: ${DASHBOARD_HOST:-dashboard.soiaviation.com}
+      # "key:secret" from a GoDaddy Production API key. Plain `:-` and not
+      # `:?`: Compose interpolates the whole file whatever the active profile,
+      # so a required-marker here would break deploys that don't use TLS.
+      GODADDY_API_TOKEN: ${GODADDY_API_TOKEN:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -10,8 +10,12 @@ else, so there is no network, firewall or backend setup to do.
 
 ## 1. DNS
 
-`dashboard.soiaviation.com` must point at this host's public IP. Add the A
-record before deploying, or the certificate cannot be issued.
+`dashboard.soiaviation.com` must resolve to this host for the people using it —
+its internal address is fine; the host needs no public IP.
+
+The certificate does **not** depend on that record. Caddy proves ownership over
+DNS-01, by writing a temporary TXT record through the GoDaddy API, so issuance
+works before the A record exists and on a host the internet cannot reach.
 
 ## 2. Decide how HTTPS terminates
 
@@ -23,10 +27,16 @@ sudo ss -lntp | grep -E ':(80|443)\s'
 ```
 
 **If 80/443 are free** — use the bundled Caddy. Add `tls` to the stack's
-profiles in Portainer, and it gets a Let's Encrypt certificate automatically.
+profiles in Portainer and set `GODADDY_API_TOKEN` (step 4); the certificate is
+obtained and renewed automatically.
+
+Caddy is **built from this repo**, not pulled: the stock `caddy:2` image has no
+DNS provider plugin compiled in and would fail to load this Caddyfile.
+`caddy/Dockerfile` builds it with the GoDaddy and Route 53 plugins. The first
+deploy is therefore a couple of minutes slower.
 
 **If a web server already serves them** — leave the profile off and point that
-server at `127.0.0.1:3000`. For nginx:
+server at `127.0.0.1:3000`. `GODADDY_API_TOKEN` is not needed. For nginx:
 
 ```nginx
 location / {
@@ -68,6 +78,19 @@ Four are required. Add them under **Environment variables** — never commit a
 They use `${VAR:?}`, so a missing **or empty** value fails the deploy
 immediately naming the variable, rather than starting a container that quietly
 misbehaves.
+
+Two more only if you turned on the `tls` profile in step 2:
+
+| Variable | Value |
+|---|---|
+| `GODADDY_API_TOKEN` | `key:secret` from a **Production** key at <https://developer.godaddy.com/keys> — an OTE key silently fails to issue |
+| `DASHBOARD_HOST` | `dashboard.soiaviation.com` — must match the host in `PUBLIC_BASE_URL` |
+
+These two deliberately use `${VAR:-}` rather than `${VAR:?}`: Compose
+interpolates the whole file whichever profile is active, so marking them
+required would break every deploy that terminates TLS elsewhere. The cost is
+that a missing token surfaces as a Caddy certificate error in the logs instead
+of a failed deploy.
 
 If the Entra secret contains a `$`, escape it as `$$` — Compose reads `$` as
 the start of a variable.
@@ -113,7 +136,8 @@ To connect a data source later, set `BACKEND_BASE_URL` (and
 | Restart loop | Check the logs. Usually `SESSION_SECRET` under 32 characters. |
 | `AADSTS50011` at sign-in | The Entra redirect URI doesn't exactly match `PUBLIC_BASE_URL` + `/auth/callback`. |
 | `invalid_client` at sign-in | Wrong `ENTRA_CLIENT_SECRET` — check you copied the Value, not the Secret ID, and that it hasn't expired. |
-| TLS never issues | DNS not pointing here yet, or 80/443 not free/open. |
+| Caddy won't start, "module not found" | The `tls` profile is running a stock `caddy:2` from a stale build. Redeploy with **re-pull image and redeploy** so `caddy/Dockerfile` is rebuilt. |
+| TLS never issues | `GODADDY_API_TOKEN` missing, an OTE key rather than Production, or the key has no access to the `soiaviation.com` zone. Caddy logs the DNS API's own error. |
 | Caddy 502 | The `tls` profile is on but something else owns 80/443. |
 | Signed in, everything locked | `DEPT_ACCESS_ENFORCE=true` with empty group ids, or no groups claim. Fails closed by design — see `SETUP.md`. |
 | All tiles show "—" | Expected. No data source is connected. |
