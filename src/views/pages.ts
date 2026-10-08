@@ -12,7 +12,7 @@ import { SOURCE_LABELS, type Department, type TileDef, type TileFormat } from ".
 import type { DepartmentData, Metric } from "./../sources/metrics.js";
 import type { Viewer } from "./../access.js";
 import { config } from "./../config.js";
-import { LIMITS, type Task } from "./../tasks.js";
+import { canSetStatus, LIMITS, type Task } from "./../tasks.js";
 
 function formatValue(value: number | string, format: TileFormat): string {
   if (typeof value === "string") return value;
@@ -168,7 +168,7 @@ function renderTracker(dept: Department, viewer: Viewer, tracker: TrackerView): 
         : `<span class="mark mark-open" aria-hidden="true">&#10007;</span>`;
       const statusText = task.done ? "Done" : "Open";
 
-      const status = editable
+      const status = canSetStatus(viewer)
         ? `<form method="post" action="${base}/${id}/status">${csrf}
              <button class="mark-btn" type="submit" title="${task.done ? "Mark as open" : "Mark as done"}">
                ${mark}<span class="sr-only">${statusText} — toggle</span></button></form>`
@@ -246,7 +246,7 @@ function renderTracker(dept: Department, viewer: Viewer, tracker: TrackerView): 
 
   const scope = viewer.manager
     ? "Manager view: every RFQ task in this department. You can assign tasks to anyone."
-    : "Showing the RFQ tasks assigned to you. Tasks a manager assigned are read-only.";
+    : "Showing the RFQ tasks assigned to you. Only a manager can mark a task done; tasks a manager assigned are read-only.";
 
   return `<section class="panel" id="rfqs">
     <div class="panel-head">

@@ -60,7 +60,8 @@ Pentagon 2000.
 |---|---|---|
 | Sees | every task in the department | only tasks assigned to them |
 | Creates | for anyone | for themselves only |
-| Edits / deletes | any task | only tasks they created |
+| Ticks status ✓ / ✗ | any task | **never** |
+| Edits notes / deletes | any task | only tasks they created |
 | Tasks a manager assigned them | — | read-only |
 
 Rules live in `src/tasks.ts` and are enforced server-side. Back up the

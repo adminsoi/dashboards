@@ -10,8 +10,11 @@
  *   - Managers (DEPT_GROUP_MANAGERS) see every task in a department, may
  *     assign a task to anyone, and may edit or delete any task.
  *   - Everyone else sees only the tasks assigned to them. They may create
- *     tasks, but only for themselves, and may edit or delete only the tasks
- *     they created. Tasks a manager assigned them are read-only.
+ *     tasks, but only for themselves, and may edit the notes of or delete
+ *     only the tasks they created. Tasks a manager assigned them are
+ *     read-only.
+ *   - Only managers change status (✓ / ✗) — on any task, including tasks a
+ *     regular user created for themselves.
  */
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -64,6 +67,7 @@ export const TASK_MESSAGES = {
   badDate: "Due date must be a valid date.",
   missing: "That task no longer exists.",
   readOnly: "This task was assigned by a manager and is read-only for you.",
+  managerOnly: "Only a manager can change a task's status.",
 } as const;
 
 export type TaskErrorCode = keyof typeof TASK_MESSAGES;
@@ -130,6 +134,11 @@ export function canEdit(viewer: Viewer, task: Task): boolean {
   if (viewer.manager) return true;
   // Self-made tasks only; anything a manager assigned stays read-only.
   return task.createdBy === me(viewer) && task.assignee === me(viewer);
+}
+
+/** Status (✓ / ✗) is a manager's call, on every task. */
+export function canSetStatus(viewer: Viewer): boolean {
+  return viewer.manager;
 }
 
 // --- Reads -----------------------------------------------------------------
@@ -218,6 +227,7 @@ export async function createTask(viewer: Viewer, department: string, input: NewT
 }
 
 export async function toggleDone(viewer: Viewer, department: string, id: string): Promise<void> {
+  if (!canSetStatus(viewer)) throw new TaskError("managerOnly");
   await mutate((s) => {
     const task = editable(s, viewer, department, id);
     task.done = !task.done;
