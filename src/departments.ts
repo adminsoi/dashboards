@@ -43,6 +43,11 @@ export interface Department {
    * pasted into client-facing material. Rendered as a visible notice.
    */
   internalOnly: boolean;
+  /**
+   * Whether this department carries the RFQ tracker: a task list the dashboard
+   * stores itself (src/tasks.ts), separate from any system of record.
+   */
+  rfqTracker?: boolean;
   tiles: TileDef[];
 }
 
@@ -92,6 +97,7 @@ export const DEPARTMENTS: Department[] = [
     tagline: "Quote pipeline and sourcing turnaround.",
     accent: "red",
     internalOnly: true,
+    rfqTracker: true,
     tiles: [
       {
         key: "rfqsAwaitingQuote",
@@ -129,6 +135,7 @@ export const DEPARTMENTS: Department[] = [
     tagline: "Supplier orders, confirmations, and lead-time exposure.",
     accent: "red",
     internalOnly: true,
+    rfqTracker: true,
     tiles: [
       {
         key: "openPurchaseOrders",
@@ -161,8 +168,9 @@ export const DEPARTMENTS: Department[] = [
     ],
   },
   {
+    // Slug stays "finance" so existing DEPT_GROUP_FINANCE settings keep working.
     slug: "finance",
-    name: "Finance",
+    name: "Accounting & Finance",
     tagline: "Receivables, payables, and invoice throughput.",
     accent: "blue",
     internalOnly: true,
@@ -196,6 +204,16 @@ export const DEPARTMENTS: Department[] = [
         source: "pentagon",
       },
     ],
+  },
+  {
+    slug: "administration",
+    name: "Administrative",
+    tagline: "Office administration and company-wide coordination.",
+    accent: "blue",
+    internalOnly: true,
+    // No data source is defined for Administrative yet, so it has no tiles
+    // rather than placeholder ones.
+    tiles: [],
   },
   {
     slug: "hr",

@@ -20,11 +20,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # Least-privilege: nothing here writes to disk at runtime.
+    # Least-privilege: the root filesystem is read-only. The one writable
+    # place is the task-store volume below.
     user: "node"
     read_only: true
     tmpfs:
       - /tmp
+    volumes:
+      # RFQ task tracker data (tasks.json). Back this volume up — it is the
+      # only state the dashboard keeps.
+      - dashboard-data:/data
     cap_drop:
       - ALL
     security_opt:
@@ -58,10 +63,26 @@ services:
       DEPT_GROUP_PROCUREMENT: ${DEPT_GROUP_PROCUREMENT:-}
       DEPT_GROUP_PURCHASING: ${DEPT_GROUP_PURCHASING:-}
       DEPT_GROUP_FINANCE: ${DEPT_GROUP_FINANCE:-}
+      DEPT_GROUP_ADMINISTRATION: ${DEPT_GROUP_ADMINISTRATION:-}
       DEPT_GROUP_HR: ${DEPT_GROUP_HR:-}
       DEPT_GROUP_IT: ${DEPT_GROUP_IT:-}
       DEPT_GROUP_OPERATIONS: ${DEPT_GROUP_OPERATIONS:-}
       DEPT_GROUP_ALL: ${DEPT_GROUP_ALL:-}
+      # Managers see every RFQ task and may assign tasks to others. Unset means
+      # nobody is a manager: everyone sees only their own tasks.
+      DEPT_GROUP_MANAGERS: ${DEPT_GROUP_MANAGERS:-}
+
+      # --- Claude links (optional) ---
+      # claude.ai project URL per department; only https://claude.ai links are kept.
+      CLAUDE_CHAT_URL: ${CLAUDE_CHAT_URL:-https://claude.ai/new}
+      CLAUDE_PROJECT_GOVERNMENT: ${CLAUDE_PROJECT_GOVERNMENT:-}
+      CLAUDE_PROJECT_PROCUREMENT: ${CLAUDE_PROJECT_PROCUREMENT:-}
+      CLAUDE_PROJECT_PURCHASING: ${CLAUDE_PROJECT_PURCHASING:-}
+      CLAUDE_PROJECT_FINANCE: ${CLAUDE_PROJECT_FINANCE:-}
+      CLAUDE_PROJECT_ADMINISTRATION: ${CLAUDE_PROJECT_ADMINISTRATION:-}
+      CLAUDE_PROJECT_HR: ${CLAUDE_PROJECT_HR:-}
+      CLAUDE_PROJECT_IT: ${CLAUDE_PROJECT_IT:-}
+      CLAUDE_PROJECT_OPERATIONS: ${CLAUDE_PROJECT_OPERATIONS:-}
 
       # --- Data source (optional) ---
       # Empty means standalone: every data tile honestly reports that nothing
@@ -92,6 +113,9 @@ services:
         # relying on the compose project name.
         aliases:
           - dashboard
+
+volumes:
+  dashboard-data:
 
 networks:
   soi:

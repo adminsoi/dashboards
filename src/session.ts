@@ -143,3 +143,18 @@ export function safeReturnTo(raw: unknown): string {
   if (typeof raw !== "string" || !raw.startsWith("/") || raw.startsWith("//")) return "/";
   return raw;
 }
+
+/**
+ * Per-user CSRF token for the task forms. Deterministic, so it needs no
+ * server-side store; bound to the user and to SESSION_SECRET, so another
+ * site cannot mint one. Belt-and-braces alongside the SameSite=Lax cookie.
+ */
+export function csrfToken(oid: string): string {
+  return sign(`csrf:${oid}`);
+}
+
+export function csrfValid(oid: string, token: unknown): boolean {
+  if (typeof token !== "string") return false;
+  const expected = csrfToken(oid);
+  return token.length === expected.length && timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+}

@@ -1,12 +1,14 @@
 /**
  * SOI Aviation department dashboards.
  *
- * A small, read-only, server-rendered web app:
+ * A small, server-rendered web app:
  *   - every page except /healthz, /assets/* and the auth routes requires a
  *     Microsoft Entra ID sign-in (same SSO/MFA as M365);
  *   - department visibility comes from Entra group membership (src/access.ts);
  *   - data comes from an optional read-only backend. None is configured by
- *     default, and the app is fully usable that way.
+ *     default, and the app is fully usable that way;
+ *   - the only writes are to the dashboard's own RFQ task store (src/tasks.ts),
+ *     through plain HTML forms with a CSRF token.
  *
  * It ships no client-side JavaScript, which is why the CSP below can deny
  * scripts entirely.
@@ -17,6 +19,8 @@ import { authorizeUrl, completeSignIn, signOutUrl, SignInError } from "./auth.js
 import {
   clearFlow,
   clearSession,
+  csrfToken,
+  csrfValid,
   readFlow,
   readSession,
   safeReturnTo,
@@ -24,8 +28,27 @@ import {
   startFlow,
   type Session,
 } from "./session.js";
-import { accessPosture, canView, restrictedDepartments, visibleDepartments, type Viewer } from "./access.js";
-import { findDepartment } from "./departments.js";
+import {
+  accessPosture,
+  canView,
+  isManagerGroups,
+  restrictedDepartments,
+  visibleDepartments,
+  type Viewer,
+} from "./access.js";
+import { findDepartment, type Department } from "./departments.js";
+import {
+  canEdit,
+  createTask,
+  deleteTask,
+  listPeople,
+  listTasks,
+  rememberPerson,
+  TASK_MESSAGES,
+  TaskError,
+  toggleDone,
+  updateNotes,
+} from "./tasks.js";
 import { loadDepartmentData } from "./sources/metrics.js";
 import { renderDepartment, renderError, renderHome, renderSignedOut, renderSignIn } from "./views/pages.js";
 import { STYLESHEET } from "./views/styles.js";
@@ -156,6 +179,8 @@ const DEV_VIEWER: Viewer = {
   username: "dev@localhost",
   name: "Local Dev",
   groups: [],
+  // DEV_ROLE=user to see the dashboard as a regular user.
+  manager: config.dev.role === "manager",
 };
 
 declare module "express-serve-static-core" {
@@ -167,7 +192,7 @@ declare module "express-serve-static-core" {
 app.use((req, res, next) => {
   if (config.auth.mode === "none") {
     req.viewer = DEV_VIEWER;
-    next();
+    rememberPerson(DEV_VIEWER).then(() => next(), next);
     return;
   }
 
@@ -184,9 +209,16 @@ app.use((req, res, next) => {
     username: session.username,
     name: session.name,
     groups: session.groups,
+    // Read from the group claim on every request, so removing someone from
+    // the managers group takes effect on their next sign-in at the latest.
+    manager: isManagerGroups(session.groups),
   };
-  next();
+  // Known people feed the manager's "assign to" list.
+  rememberPerson(req.viewer).then(() => next(), next);
 });
+
+// Form posts (task tracker only). Small limit: these are a few short fields.
+app.use(express.urlencoded({ extended: false, limit: "16kb" }));
 
 // --- Authenticated routes --------------------------------------------------
 
@@ -202,13 +234,14 @@ app.get("/", (req, res) => {
   );
 });
 
-app.get("/d/:slug", async (req, res, next) => {
+/** Resolve the department and check access, or send the error page and return null. */
+function departmentFor(req: express.Request, res: express.Response): Department | null {
   const viewer = req.viewer as Viewer;
   const dept = findDepartment(String(req.params.slug));
 
   if (!dept) {
     res.status(404).send(renderError({ title: "Not found", message: "No such dashboard.", status: 404 }));
-    return;
+    return null;
   }
 
   if (!canView(viewer, dept)) {
@@ -222,17 +255,110 @@ app.get("/d/:slug", async (req, res, next) => {
         status: 403,
       }),
     );
-    return;
+    return null;
   }
+  return dept;
+}
+
+app.get("/d/:slug", async (req, res, next) => {
+  const viewer = req.viewer as Viewer;
+  const dept = departmentFor(req, res);
+  if (!dept) return;
 
   try {
     // Attribute the backend read to the signed-in person, not to the app.
     const data = await loadDepartmentData(dept.slug, viewer.username || viewer.oid);
-    res.send(renderDepartment({ viewer, dept, data }));
+    const tracker = dept.rfqTracker
+      ? {
+          tasks: (await listTasks(viewer, dept.slug)).map((task) => ({
+            task,
+            editable: canEdit(viewer, task),
+          })),
+          people: viewer.manager ? await listPeople() : [],
+          csrf: csrfToken(viewer.oid),
+          // Only known codes map to text; anything else shows nothing.
+          error: Object.hasOwn(TASK_MESSAGES, String(req.query["error"]))
+            ? TASK_MESSAGES[String(req.query["error"]) as keyof typeof TASK_MESSAGES]
+            : undefined,
+        }
+      : undefined;
+    res.send(renderDepartment({ viewer, dept, data, tracker }));
   } catch (err) {
     next(err);
   }
 });
+
+// --- RFQ task tracker (writes) ----------------------------------------------
+
+/**
+ * Wrap a task write: department + access check, CSRF check, then redirect
+ * back to the tracker (Post/Redirect/Get). A TaskError's message is shown to
+ * the user; anything else is a 500.
+ */
+function taskAction(
+  action: (viewer: Viewer, dept: Department, req: express.Request) => Promise<unknown>,
+): express.RequestHandler {
+  return async (req, res, next) => {
+    const viewer = req.viewer as Viewer;
+    const dept = departmentFor(req, res);
+    if (!dept) return;
+    if (!dept.rfqTracker) {
+      res.status(404).send(renderError({ title: "Not found", message: "No such dashboard.", status: 404 }));
+      return;
+    }
+    const back = `/d/${encodeURIComponent(dept.slug)}`;
+    if (!csrfValid(viewer.oid, req.body?.["csrf"])) {
+      res.redirect(303, `${back}?error=invalid#rfqs`);
+      return;
+    }
+    try {
+      await action(viewer, dept, req);
+      console.log(
+        JSON.stringify({ at: "tasks.write", oid: viewer.oid, department: dept.slug, path: req.path }),
+      );
+      res.redirect(303, `${back}#rfqs`);
+    } catch (err) {
+      if (err instanceof TaskError) {
+        res.redirect(303, `${back}?error=${err.code}#rfqs`);
+        return;
+      }
+      next(err);
+    }
+  };
+}
+
+function field(req: express.Request, name: string): string {
+  const v = req.body?.[name];
+  return typeof v === "string" ? v : "";
+}
+
+app.post(
+  "/d/:slug/tasks",
+  taskAction((viewer, dept, req) =>
+    createTask(viewer, dept.slug, {
+      partNumber: field(req, "partNumber"),
+      customer: field(req, "customer"),
+      assignee: field(req, "assignee"),
+      dueDate: field(req, "dueDate"),
+      notes: field(req, "notes"),
+    }),
+  ),
+);
+
+app.post(
+  "/d/:slug/tasks/:id/status",
+  taskAction((viewer, dept, req) => toggleDone(viewer, dept.slug, String(req.params.id))),
+);
+
+app.post(
+  "/d/:slug/tasks/:id/notes",
+  taskAction((viewer, dept, req) => updateNotes(viewer, dept.slug, String(req.params.id), field(req, "notes"))),
+);
+
+app.post(
+  "/d/:slug/tasks/:id/delete",
+  taskAction((viewer, dept, req) => deleteTask(viewer, dept.slug, String(req.params.id))),
+);
 
 // --- Fallbacks -------------------------------------------------------------
 

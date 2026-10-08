@@ -55,18 +55,25 @@ data permissions and no admin consent are required.**
 
 ## 2. Create the department groups
 
-Seven security groups, plus optionally one for people who see everything:
+Eight security groups, plus optionally one for people who see everything
+and one for managers:
 
 | Dashboard | Suggested group name | Env var |
 |---|---|---|
 | Government | `SOI-Dash-Government` | `DEPT_GROUP_GOVERNMENT` |
 | Procurement | `SOI-Dash-Procurement` | `DEPT_GROUP_PROCUREMENT` |
 | Purchasing | `SOI-Dash-Purchasing` | `DEPT_GROUP_PURCHASING` |
-| Finance | `SOI-Dash-Finance` | `DEPT_GROUP_FINANCE` |
+| Accounting & Finance | `SOI-Dash-Finance` | `DEPT_GROUP_FINANCE` |
+| Administrative | `SOI-Dash-Administrative` | `DEPT_GROUP_ADMINISTRATION` |
 | Human Resources | `SOI-Dash-HR` | `DEPT_GROUP_HR` |
 | Information Technology | `SOI-Dash-IT` | `DEPT_GROUP_IT` |
 | Operations | `SOI-Dash-Operations` | `DEPT_GROUP_OPERATIONS` |
 | (every dashboard) | `SOI-Dash-AllAccess` | `DEPT_GROUP_ALL` |
+| (RFQ task managers) | `SOI-Dash-Managers` | `DEPT_GROUP_MANAGERS` |
+
+The managers group grants no dashboard access by itself — a manager still
+needs the department group. It lets them see every RFQ task in departments
+they can open and assign tasks to others.
 
 Use each group's **Object ID**, not its name.
 
@@ -149,9 +156,11 @@ needs to change.
 - Third-party text (SAM.gov titles, agency names) is HTML-escaped, and links
   are rejected unless they are plain `http(s)`.
 - Same container hardening as the connectors: non-root, read-only root
-  filesystem, all capabilities dropped, `no-new-privileges`, no published port.
-- Read-only: only GETs to the backend, and no write path to any system of
-  record.
+  filesystem (except the `dashboard-data` task-store volume), all
+  capabilities dropped, `no-new-privileges`, no published port.
+- Read-only toward systems of record: only GETs to the backend. The RFQ task
+  tracker writes only to the app's own `tasks.json`, via form posts that carry
+  a per-user CSRF token; who may change what is enforced server-side.
 - Backend reads carry the signed-in user in `x-soi-user`, so backend logs stay
   attributable to a person.
 - Rotating `SESSION_SECRET` immediately invalidates every session.
