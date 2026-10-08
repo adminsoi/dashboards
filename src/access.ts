@@ -3,7 +3,7 @@
  *
  * Maps a signed-in user's Entra group ids to the departments they may open.
  * Enforcement is gated on DEPT_ACCESS_ENFORCE so the app can ship before IT
- * has finished creating the six security groups; while it is off, access is
+ * has finished creating the department security groups; while it is off, access is
  * permissive but the UI states plainly that it is not being enforced, so the
  * state is never silently misread as locked down.
  */
@@ -15,6 +15,13 @@ export interface Viewer {
   username: string;
   name: string;
   groups: string[];
+  /** Member of DEPT_GROUP_MANAGERS: may assign RFQ tasks and sees all of them. */
+  manager: boolean;
+}
+
+/** Whether a set of group ids includes a manager group. */
+export function isManagerGroups(groups: string[]): boolean {
+  return config.access.managers.some((g) => groups.includes(g));
 }
 
 /** True when the viewer belongs to a group granting every department. */

@@ -10,9 +10,11 @@
  *     and every data tile honestly reports that no source is connected. Set it
  *     later to light those tiles up; nothing else has to change.
  *
- * This app is READ-ONLY. It issues GETs to the backend and renders them; it
- * never writes to a system of record.
+ * This app is READ-ONLY toward the backend. It issues GETs and renders them; it
+ * never writes to a system of record. Its only writes go to its own RFQ task
+ * store on a local volume (src/tasks.ts).
  */
+import { DEPARTMENTS } from "./departments.js";
 
 // Auto-load a local .env if present (Node >= 20.12). Missing file is fine —
 // values come from the real environment in production.
@@ -68,7 +70,7 @@ export const config = {
     /**
      * When false, any authenticated tenant user may open any department — the
      * group plumbing still runs and is shown in the UI, but is not enforced.
-     * Flip to true once IT has created the six Entra security groups and set
+     * Flip to true once IT has created the Entra department groups and set
      * the DEPT_GROUP_* ids below. Start permissive so sign-in works on day one
      * without a half-populated group directory locking everyone out.
      */
@@ -82,12 +84,44 @@ export const config = {
       procurement: splitIds(process.env.DEPT_GROUP_PROCUREMENT),
       purchasing: splitIds(process.env.DEPT_GROUP_PURCHASING),
       finance: splitIds(process.env.DEPT_GROUP_FINANCE),
+      administration: splitIds(process.env.DEPT_GROUP_ADMINISTRATION),
       hr: splitIds(process.env.DEPT_GROUP_HR),
       it: splitIds(process.env.DEPT_GROUP_IT),
       operations: splitIds(process.env.DEPT_GROUP_OPERATIONS),
     } as Record<string, string[]>,
     /** Members of these groups see every department (e.g. leadership, IT admin). */
     allDepartments: splitIds(process.env.DEPT_GROUP_ALL),
+    /**
+     * Members of these groups are managers: they see every RFQ task in the
+     * departments they can open and may assign tasks to anyone. Everyone else
+     * sees and creates only their own. Unset means nobody is a manager.
+     */
+    managers: splitIds(process.env.DEPT_GROUP_MANAGERS),
+  },
+
+  tasks: {
+    /** Directory holding tasks.json. Mounted as a volume in production. */
+    dataDir: process.env.TASKS_DATA_DIR ?? "./data",
+  },
+
+  claude: {
+    /** Where "New chat" goes. Must be a claude.ai URL. */
+    chatUrl: claudeUrl(process.env.CLAUDE_CHAT_URL) ?? "https://claude.ai/new",
+    /**
+     * Claude project link per department slug, from CLAUDE_PROJECT_<SLUG>.
+     * Anything that is not an https://claude.ai URL is dropped.
+     */
+    projects: Object.fromEntries(
+      DEPARTMENTS.flatMap((d) => {
+        const url = claudeUrl(process.env[`CLAUDE_PROJECT_${d.slug.toUpperCase()}`]);
+        return url ? [[d.slug, url]] : [];
+      }),
+    ) as Record<string, string>,
+  },
+
+  dev: {
+    /** AUTH_MODE=none only: "manager" (default) or "user", to try both roles. */
+    role: (process.env.DEV_ROLE ?? "manager").toLowerCase() === "user" ? "user" : "manager",
   },
 } as const;
 
@@ -96,6 +130,22 @@ function splitIds(raw: string | undefined): string[] {
     .split(/[,\s]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/** Accept only https://claude.ai links, so a typo cannot send people elsewhere. */
+function claudeUrl(raw: string | undefined): string | undefined {
+  if (!raw?.trim()) return undefined;
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== "https:" || url.hostname !== "claude.ai") {
+      console.warn(`Ignoring Claude link that is not https://claude.ai: ${url.origin}`);
+      return undefined;
+    }
+    return url.toString();
+  } catch {
+    console.warn("Ignoring a Claude link that is not a valid URL.");
+    return undefined;
+  }
 }
 
 function stripTrailingSlash(url: string): string {

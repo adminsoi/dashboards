@@ -8,6 +8,7 @@
  * not plain http(s), so a javascript: or data: link from an upstream feed
  * cannot become a live link in the page.
  */
+import { config } from "./../config.js";
 
 const ESCAPES: Record<string, string> = {
   "&": "&amp;",
@@ -47,6 +48,9 @@ export interface LayoutOptions {
 }
 
 export function layout(opts: LayoutOptions): string {
+  const claudeLink = opts.user
+    ? `<a class="topbar-link" href="${esc(config.claude.chatUrl)}" target="_blank" rel="noopener noreferrer">Claude</a>`
+    : "";
   const userBlock = opts.user
     ? `<div class="topbar-user"><strong>${esc(opts.user.name || opts.user.username)}</strong>
          <a href="/signout">Sign out</a></div>`
@@ -58,13 +62,14 @@ export function layout(opts: LayoutOptions): string {
          <a class="brand" href="/"><span class="brand-mark"></span>SOI Aviation
            <span class="brand-sub">Department dashboards</span></a>
          <div class="topbar-spacer"></div>
+         ${claudeLink}
          ${userBlock}
        </div></header>`;
 
   const footer = opts.bare
     ? ""
     : `<footer><div class="wrap">
-         <span>Internal use only. Read-only view.</span>
+         <span>Internal use only.</span>
          <span class="topbar-spacer"></span>
          <a href="/healthz">Status</a>
        </div></footer>`;
